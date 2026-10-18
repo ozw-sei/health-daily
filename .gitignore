@@ -1,0 +1,27 @@
+*.iml
+.gradle/
+local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.aab
+output.json
+.kotlin/
+/agent-tools/
+
+# secrets and signing material
+*.jks
+*.keystore
+*.pem
+*.p12
+*.key
+.env
+.env.*
+google-services.json
+secrets.properties
