@@ -1,18 +1,18 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "jp.healthsync.daily"
-    compileSdk = 36
+    // Platform android-37.2 is the newest stable SDK. Compose 1.12 requires compileSdk 37+.
+    compileSdk = 37
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "jp.healthsync.daily"
         minSdk = 28
-        // API 36 is the newest Android platform package published as of October 2026.
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -26,10 +26,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {

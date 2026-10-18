@@ -3,7 +3,7 @@ package jp.healthsync.daily.settings
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.security.crypto.MasterKeys
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -22,9 +22,10 @@ data class SendLogEntry(
 )
 
 /**
- * Webhook URL and the auth header live in EncryptedSharedPreferences
- * (AES-256-SIV keys, AES-256-GCM values). The header value is never written
- * to the send log.
+ * Webhook URL and the auth header live in EncryptedSharedPreferences.
+ * Preference keys are AES-256-SIV and values are AES-256-GCM, with an
+ * AES-256-GCM master key in the Android Keystore. The header value is never
+ * written to the send log.
  */
 class SettingsStore(context: Context) {
     private val prefs: SharedPreferences by lazy { open(context.applicationContext) }
@@ -87,13 +88,11 @@ class SettingsStore(context: Context) {
     }
 
     private fun open(context: Context): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
+        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
         return EncryptedSharedPreferences.create(
-            context,
             FILE_NAME,
-            masterKey,
+            masterKeyAlias,
+            context,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )

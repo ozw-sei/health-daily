@@ -4,13 +4,13 @@
 
 A personal sideloaded Android app. It reads one day of Health Connect data and POSTs JSON to a webhook. It is not published on the Play Store. The receiver is a habit-tracker webhook.
 
-- minSdk 28 / targetSdk 36（2026-10 時点で公開されている最新の Android SDK プラットフォーム）
+- minSdk 28 / targetSdk 37（compileSdk は安定版プラットフォーム 37.2）
 - Kotlin, Jetpack Compose, WorkManager, EncryptedSharedPreferences
 - パッケージ `jp.healthsync.daily`
 
-API 37 の platform パッケージは SDK リポジトリにまだ無いため、targetSdk は公開済みの最新である 36 です。
+compileSdk は 2026-10 時点の安定版プラットフォーム `android-37.2`、targetSdk は API 37 です。
 
-targetSdk is 36 because that is the newest platform package in the SDK repository. An API 37 platform package is not published yet.
+compileSdk is the stable `android-37.2` platform (October 2026). targetSdk is API 37.
 
 ---
 
@@ -63,7 +63,7 @@ Fitbit、Pixel Watch、asken、MyFitnessPal、EufyLife など、Health Connect �
 
 ### ビルド
 
-JDK 17 以上と Android SDK（platform 36、build-tools 36.0.0）が必要です。`ANDROID_HOME` か `local.properties` の `sdk.dir` を設定します。
+JDK 17 以上と Android SDK（platform `android-37.2`、build-tools 36.0.0）が必要です。`ANDROID_HOME` か `local.properties` の `sdk.dir` を設定します。
 
 ```bash
 ./gradlew test
@@ -143,7 +143,7 @@ The receiver authenticates with a normal HTTP `Authorization` header. The owner 
 
 ### Build
 
-Requires JDK 17+ and the Android SDK (platform 36 and build-tools 36.0.0). Set `ANDROID_HOME`, or `sdk.dir` in `local.properties`.
+Requires JDK 17+ and the Android SDK (platform `android-37.2` and build-tools 36.0.0). Set `ANDROID_HOME`, or `sdk.dir` in `local.properties`.
 
 ```bash
 ./gradlew test
