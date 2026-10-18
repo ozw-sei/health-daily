@@ -14,3 +14,14 @@ local.properties
 output.json
 .kotlin/
 /agent-tools/
+
+# secrets and signing material
+*.jks
+*.keystore
+*.pem
+*.p12
+*.key
+.env
+.env.*
+google-services.json
+secrets.properties

@@ -17,8 +17,8 @@ class AuthHeaderTest {
 
     @Test
     fun customName_isKept() {
-        val decision = AuthHeader.resolve("X-Sender-Key", "sk_live_1")
-        assertEquals(AuthHeaderDecision.Include("X-Sender-Key", "sk_live_1"), decision)
+        val decision = AuthHeader.resolve("X-Sender-Key", "example-token")
+        assertEquals(AuthHeaderDecision.Include("X-Sender-Key", "example-token"), decision)
     }
 
     @Test
@@ -29,13 +29,13 @@ class AuthHeaderTest {
 
     @Test
     fun valueWithoutName_isInvalid() {
-        val decision = AuthHeader.resolve(" ", "secret")
+        val decision = AuthHeader.resolve(" ", "example-value")
         assertEquals(AuthHeaderDecision.Invalid("認証ヘッダー名が空です"), decision)
     }
 
     @Test
     fun nameWithSpace_isInvalid() {
-        val decision = AuthHeader.resolve("Auth Header", "secret")
+        val decision = AuthHeader.resolve("Auth Header", "example-value")
         assertEquals(AuthHeaderDecision.Invalid("認証ヘッダー名に使えない文字があります"), decision)
     }
 }
