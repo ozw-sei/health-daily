@@ -14,6 +14,7 @@ import jp.healthsync.daily.settings.SettingsStore
 import jp.healthsync.daily.summary.DailySummaryJson
 import jp.healthsync.daily.summary.SummaryAggregator
 import jp.healthsync.daily.summary.TOKYO
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -49,89 +50,137 @@ class SyncCoordinator(
 ) {
     private val gate = Mutex()
 
-    suspend fun sendDate(date: LocalDate): SendResult = gate.withLock { sendLocked(date) }
+    suspend fun sendDate(date: LocalDate): SendResult =
+        gate.withLock { sendLocked(listOf(date)) }.single()
 
     suspend fun sendRecentDays(days: Int, today: LocalDate = LocalDate.now(TOKYO)): List<SendResult> {
         val start = today.minusDays((days - 1).toLong())
-        return gate.withLock {
-            (0 until days).map { offset -> sendLocked(start.plusDays(offset.toLong())) }
-        }
+        val dates = (0 until days).map { offset -> start.plusDays(offset.toLong()) }
+        return gate.withLock { sendLocked(dates) }
     }
 
-    private suspend fun sendLocked(date: LocalDate): SendResult {
-        val result = try {
-            postDay(date)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+    /**
+     * Reads every requested day, then POSTs one `health-daily/v1-batch` body per
+     * chunk. A chunk is the whole sync unless it is longer than [MAX_BATCH_DAYS].
+     * WorkManager retry observes that single response and runs again for the chunk,
+     * not for each day inside it.
+     */
+    private suspend fun sendLocked(dates: List<LocalDate>): List<SendResult> {
+        if (dates.isEmpty()) return emptyList()
+        return try {
+            deliverAll(dates)
+        } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (error: SecurityException) {
-            SendResult.ConfigError(
-                date,
-                "Health Connect の読み取りが拒否されました。権限とバックグラウンド読み取りを確認してください。",
-            )
-        } catch (error: IllegalArgumentException) {
-            SendResult.ConfigError(date, "URL または認証ヘッダーの形式が正しくありません")
-        } catch (error: IOException) {
-            SendResult.NetworkError(date, error.message ?: "ネットワークエラー")
         } catch (error: Exception) {
-            SendResult.NetworkError(date, error.message ?: error.javaClass.simpleName)
+            val results = uniqueDatesAscending(dates).map { errorResult(it, error) }
+            record(results)
+            results
         }
-        record(result)
-        return result
     }
 
-    private suspend fun postDay(date: LocalDate): SendResult {
+    private suspend fun deliverAll(dates: List<LocalDate>): List<SendResult> {
+        val ready = when (val target = openDelivery()) {
+            is DeliveryTarget.Rejected -> {
+                val results = uniqueDatesAscending(dates).map { SendResult.ConfigError(it, target.message) }
+                record(results)
+                return results
+            }
+            is DeliveryTarget.Ready -> target
+        }
+        val payloads = dates.map { date ->
+            val day = health.readDay(date)
+            DatedPayload(date, DailySummaryJson.encode(SummaryAggregator.aggregate(day)))
+        }
+        val results = mutableListOf<SendResult>()
+        for (batch in outboundBatches(payloads)) {
+            val chunk = postBatch(ready, batch)
+            record(chunk)
+            results += chunk
+        }
+        return results
+    }
+
+    private suspend fun postBatch(ready: DeliveryTarget.Ready, batch: OutboundBatch): List<SendResult> {
+        return try {
+            val response = withContext(Dispatchers.IO) {
+                webhook.post(ready.url, ready.auth, batch.json)
+            }
+            batch.dates.map { date ->
+                if (response.ok) {
+                    SendResult.Ok(date, response.status)
+                } else {
+                    SendResult.HttpError(date, response.status, response.detail)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            batch.dates.map { errorResult(it, error) }
+        }
+    }
+
+    private fun openDelivery(): DeliveryTarget {
         val stored = settings.load()
         val url = stored.webhookUrl.trim()
         if (url.isEmpty()) {
-            return SendResult.ConfigError(date, "Webhook URL が未設定です")
+            return DeliveryTarget.Rejected("Webhook URL が未設定です")
         }
         if (!url.startsWith("https://") && !url.startsWith("http://")) {
-            return SendResult.ConfigError(date, "URL は http:// または https:// で始めてください")
+            return DeliveryTarget.Rejected("URL は http:// または https:// で始めてください")
         }
-        when (val auth = AuthHeader.resolve(stored.authHeaderName, stored.authHeaderValue)) {
-            is AuthHeaderDecision.Invalid -> return SendResult.ConfigError(date, auth.reason)
-            is AuthHeaderDecision.Omit -> return deliver(date, url, null)
-            is AuthHeaderDecision.Include -> return deliver(date, url, auth)
+        val auth = when (val decision = AuthHeader.resolve(stored.authHeaderName, stored.authHeaderValue)) {
+            is AuthHeaderDecision.Invalid -> return DeliveryTarget.Rejected(decision.reason)
+            is AuthHeaderDecision.Omit -> null
+            is AuthHeaderDecision.Include -> decision
         }
-    }
-
-    private suspend fun deliver(
-        date: LocalDate,
-        url: String,
-        auth: AuthHeaderDecision.Include?,
-    ): SendResult {
         when (health.availability()) {
             HealthAvailability.UpdateRequired ->
-                return SendResult.ConfigError(date, "Health Connect のインストールまたは更新が必要です")
+                return DeliveryTarget.Rejected("Health Connect のインストールまたは更新が必要です")
             HealthAvailability.Unavailable ->
-                return SendResult.ConfigError(date, "この端末では Health Connect を利用できません")
+                return DeliveryTarget.Rejected("この端末では Health Connect を利用できません")
             HealthAvailability.Available -> Unit
         }
-        val day = health.readDay(date)
-        val json = DailySummaryJson.encode(SummaryAggregator.aggregate(day))
-        val response = withContext(Dispatchers.IO) { webhook.post(url, auth, json) }
-        return if (response.ok) {
-            SendResult.Ok(date, response.status)
-        } else {
-            SendResult.HttpError(date, response.status, response.detail)
-        }
+        return DeliveryTarget.Ready(url, auth)
     }
 
-    private fun record(result: SendResult) {
-        val status = when (result) {
-            is SendResult.Ok -> result.status
-            is SendResult.HttpError -> result.status
+    private fun record(results: List<SendResult>) {
+        if (results.isEmpty()) return
+        val first = results.first()
+        val status = when (first) {
+            is SendResult.Ok -> first.status
+            is SendResult.HttpError -> first.status
             is SendResult.NetworkError -> null
             is SendResult.ConfigError -> null
+        }
+        val dates = results.map { it.date }.sorted()
+        val dateLabel = if (dates.size == 1) {
+            dates.first().toString()
+        } else {
+            "${dates.first()}..${dates.last()}"
         }
         settings.appendLog(
             SendLogEntry(
                 at = OffsetDateTime.now(TOKYO).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                date = result.date.toString(),
+                date = dateLabel,
                 status = status,
-                ok = result is SendResult.Ok,
-                detail = result.userMessage(),
+                ok = results.all { it is SendResult.Ok },
+                detail = batchDetail(results),
             ),
         )
     }
+
+    private fun errorResult(date: LocalDate, error: Exception): SendResult = when (error) {
+        is SecurityException -> SendResult.ConfigError(
+            date,
+            "Health Connect の読み取りが拒否されました。権限とバックグラウンド読み取りを確認してください。",
+        )
+        is IllegalArgumentException -> SendResult.ConfigError(date, "URL または認証ヘッダーの形式が正しくありません")
+        is IOException -> SendResult.NetworkError(date, error.message ?: "ネットワークエラー")
+        else -> SendResult.NetworkError(date, error.message ?: error.javaClass.simpleName)
+    }
+}
+
+private sealed class DeliveryTarget {
+    data class Ready(val url: String, val auth: AuthHeaderDecision.Include?) : DeliveryTarget()
+    data class Rejected(val message: String) : DeliveryTarget()
 }

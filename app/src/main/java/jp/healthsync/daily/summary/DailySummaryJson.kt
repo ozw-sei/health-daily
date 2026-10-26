@@ -4,6 +4,15 @@ import java.math.BigDecimal
 
 /** Compact JSON with explicit nulls and stable key order for `health-daily/v1`. */
 object DailySummaryJson {
+    /**
+     * One webhook body for a whole sync. Each [dayJson] value is inserted unchanged,
+     * so a stored `health-daily/v1` object stays byte-for-byte the same.
+     */
+    fun encodeBatch(dayJson: List<String>): String {
+        val days = dayJson.joinToString(prefix = "[", postfix = "]", separator = ",")
+        return "{\"schema\":${quote(BATCH_SCHEMA)},\"days\":$days}"
+    }
+
     fun encode(summary: DailySummary): String {
         val json = JsonMap()
         json.string("schema", summary.schema)
