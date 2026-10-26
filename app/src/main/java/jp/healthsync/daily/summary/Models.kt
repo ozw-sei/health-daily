@@ -6,6 +6,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 const val SCHEMA = "health-daily/v1"
+const val BATCH_SCHEMA = "health-daily/v1-batch"
 const val TIMEZONE_ID = "Asia/Tokyo"
 val TOKYO: ZoneId = ZoneId.of(TIMEZONE_ID)
 

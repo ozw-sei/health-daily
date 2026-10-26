@@ -234,7 +234,7 @@ private fun SendCard(
 ) {
     SectionCard(title = "送信") {
         Text(
-            "自動送信は ${describeNextSync(java.time.ZonedDateTime.now(TOKYO))} 頃です。圏外のときは接続後に送られ、サーバーエラーは間隔を空けて再試行します。ボタンは保存してから送ります。",
+            "自動送信は ${describeNextSync(java.time.ZonedDateTime.now(TOKYO))} 頃です。圏外のときは接続後に送られ、サーバーエラーは間隔を空けて再試行します。複数日も1回の POST にまとめます。ボタンは保存してから送ります。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
