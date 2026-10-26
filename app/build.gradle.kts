@@ -30,12 +30,24 @@ val releaseVersionCode = releaseVersionCodeRaw.toIntOrNull()
 require(releaseVersionCode > 0) { "versionCode must be positive, got $releaseVersionCode" }
 
 // Release signing is applied only when every value is present (env or -P).
+// Passwords and the alias are not trimmed; only empty or absent values count as missing.
 // CI decodes ANDROID_KEYSTORE_BASE64 to ANDROID_KEYSTORE_PATH under RUNNER_TEMP.
 // Absent values leave the release build unsigned, not signed with the debug key.
-val keystorePath = propOrEnv("ANDROID_KEYSTORE_PATH")
-val keystorePassword = propOrEnv("ANDROID_KEYSTORE_PASSWORD")
-val keyAlias = propOrEnv("ANDROID_KEY_ALIAS")
-val keyPassword = propOrEnv("ANDROID_KEY_PASSWORD")
+fun signingValue(name: String): String? {
+    val fromProperty = providers.gradleProperty(name).orNull
+    val raw = if (fromProperty != null) {
+        fromProperty
+    } else {
+        providers.environmentVariable(name).orNull ?: return null
+    }
+    if (raw.isEmpty()) return null
+    return raw
+}
+
+val keystorePath = signingValue("ANDROID_KEYSTORE_PATH")
+val keystorePassword = signingValue("ANDROID_KEYSTORE_PASSWORD")
+val keyAlias = signingValue("ANDROID_KEY_ALIAS")
+val keyPassword = signingValue("ANDROID_KEY_PASSWORD")
 val signingParts = listOf(keystorePath, keystorePassword, keyAlias, keyPassword)
 val releaseSigning =
     when (signingParts.count { it != null }) {

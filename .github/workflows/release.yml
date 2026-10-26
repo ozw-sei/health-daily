@@ -29,29 +29,34 @@ jobs:
       - name: Require a production tag on the default branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          bash scripts/release-version.sh --self-test
           tag="${GITHUB_REF#refs/tags/}"
-          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::This app publishes a normal release from tag vX.Y.Z only (got '${tag}'). vX.Y.Z-beta.N is not used here."
+          version_line="$(bash scripts/release-version.sh "$tag")"
+          read -r version_name version_code <<<"$version_line"
+          if [[ -z "${version_name}" || -z "${version_code}" ]]; then
+            echo "::error::Version calculation produced no output for ${tag}."
             exit 1
           fi
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
           if [[ -z "${DEFAULT_BRANCH}" ]]; then
             echo "::error::Could not determine the default branch."
             exit 1
           fi
-          git fetch --no-tags origin "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${DEFAULT_BRANCH}"; then
-            echo "::error::Tag ${tag} (${GITHUB_SHA}) is not on origin/${DEFAULT_BRANCH}."
+          if [[ -z "${GITHUB_TOKEN}" ]]; then
+            echo "::error::GITHUB_TOKEN is empty; cannot fetch ${DEFAULT_BRANCH}."
             exit 1
           fi
-          version_name="${tag#v}"
-          version_code=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + 99))
-          if (( version_code <= 0 || version_code > 2100000000 )); then
-            echo "::error::versionCode ${version_code} is outside the Android range."
+          # persist-credentials is false, so this fetch authenticates itself
+          # and does not write the header into git config.
+          basic="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w 0)"
+          git -c "http.extraheader=AUTHORIZATION: basic ${basic}" \
+            fetch --no-tags origin \
+            "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          unset basic
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Tag ${tag} (${GITHUB_SHA}) is not on origin/${DEFAULT_BRANCH}."
             exit 1
           fi
           echo "RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
@@ -59,6 +64,7 @@ jobs:
           echo "VERSION_CODE=${version_code}" >> "$GITHUB_ENV"
           echo "versionName=${version_name} versionCode=${version_code}"
 
+      # Stop before Gradle. A missing secret must not build or upload an unsigned APK.
       - name: Require release signing secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -73,7 +79,7 @@ jobs:
           [[ -z "${ANDROID_KEY_ALIAS}" ]] && missing+=("ANDROID_KEY_ALIAS")
           [[ -z "${ANDROID_KEY_PASSWORD}" ]] && missing+=("ANDROID_KEY_PASSWORD")
           if (( ${#missing[@]} > 0 )); then
-            echo "::error::Missing release signing secrets: ${missing[*]}. Refusing to sign with a debug key."
+            echo "::error::Missing release signing secrets: ${missing[*]}. Refusing to build an unsigned or debug-signed APK."
             exit 1
           fi
 
@@ -186,6 +192,7 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
@@ -204,6 +211,11 @@ jobs:
             exit 1
           fi
           sha256sum -c "$sum"
+          resolved="$(gh api "repos/${GH_REPO}/commits/${tag}" --jq .sha)"
+          if [[ "$resolved" != "$GITHUB_SHA" ]]; then
+            echo "::error::Tag ${tag} points at ${resolved}, not ${GITHUB_SHA}."
+            exit 1
+          fi
           gh release create "$tag" \
             --title "$tag" \
             --generate-notes \
