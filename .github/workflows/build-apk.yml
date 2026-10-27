@@ -1,25 +1,41 @@
 name: Build debug APK
 
+# Pull requests and main. No release signing secrets. The APK is signed
+# with the runner debug key, so it cannot update a release install.
+# Tag vX.Y.Z is published by release.yml.
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # upload-artifact v4+ finalizes via the actions API.
+      actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v4
+      - name: Test release version calculation
+        run: bash scripts/release-version.sh --self-test
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: 17
 
       # v3 still installs the removed SDK "tools" package and fails with
       # "Failed to find package 'tools'". v4 installs cmdline-tools only.
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install Android SDK
         run: sdkmanager "platforms;android-37.2" "build-tools;36.0.0"
@@ -29,7 +45,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --stacktrace
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: health-daily-debug-apk
           path: app/build/outputs/apk/debug/*.apk
