@@ -61,9 +61,13 @@ class SyncCoordinator(
 
     /**
      * Reads every requested day, then POSTs one `health-daily/v1-batch` body per
-     * chunk. A chunk is the whole sync unless it is longer than [MAX_BATCH_DAYS].
-     * WorkManager retry observes that single response and runs again for the chunk,
-     * not for each day inside it.
+     * chunk, oldest first. A chunk holds at most [MAX_BATCH_DAYS] days, and is
+     * split again when the serialized body would exceed [MAX_BATCH_BYTES].
+     * One day that is already over that byte cap is still posted alone.
+     *
+     * Chunks are sent sequentially. A failed POST is recorded and does not skip
+     * or drop the later chunks. WorkManager retry still applies to the request
+     * that failed, not to each day inside it.
      */
     private suspend fun sendLocked(dates: List<LocalDate>): List<SendResult> {
         if (dates.isEmpty()) return emptyList()
@@ -92,6 +96,7 @@ class SyncCoordinator(
             DatedPayload(date, DailySummaryJson.encode(SummaryAggregator.aggregate(day)))
         }
         val results = mutableListOf<SendResult>()
+        // One failed chunk must not stop the rest. Each POST is its own retry unit.
         for (batch in outboundBatches(payloads)) {
             val chunk = postBatch(ready, batch)
             record(chunk)
